@@ -1,0 +1,172 @@
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity Double_Pulse_Final2 is
+    port (
+        clk           : in  std_logic;
+        rst           : in  std_logic;
+        button        : in  std_logic;
+        time_input    : in  std_logic_vector(7 downto 0);
+        set_time      : in  std_logic_vector(2 downto 0);
+        time_base_sel : in  std_logic_vector(1 downto 0);
+        led_indicator : out std_logic_vector(2 downto 0);
+        output_signal : out std_logic
+    );
+end entity;
+
+architecture behavioral of Double_Pulse_Final2 is
+
+    type state_type is (IDLE, HIGH1, LOW1, HIGH2);
+    signal state         : state_type := IDLE;
+    signal count         : integer := 0;
+    signal button_last   : std_logic := '0';
+    signal HIGH1_TIME    : integer := 0;
+    signal LOW1_TIME     : integer := 0;
+    signal HIGH2_TIME    : integer := 0;
+    signal HIGH1_MULT    : std_logic_vector(1 downto 0) := "00";
+    signal LOW1_MULT     : std_logic_vector(1 downto 0) := "00";
+    signal HIGH2_MULT    : std_logic_vector(1 downto 0) := "00";
+    signal all_times_set : std_logic := '0';
+    signal times_set_flag: std_logic_vector(2 downto 0) := "000";
+    signal captured_time : integer;
+
+    -- LED timer logic
+    signal led_timer     : integer := 0;
+    signal led_active    : std_logic := '0';
+    constant LED_TIMEOUT : integer := 150_000_000;  -- 3 sec at 50 MHz
+
+    -- Internal LED state (latched version)
+    signal internal_led_indicator : std_logic_vector(2 downto 0) := "000";
+
+    -- Function to convert base selector to multiplier
+    function get_multiplier(sel: std_logic_vector(1 downto 0)) return integer is
+    begin
+        case sel is
+            when "00"   => return 1;          -- 10 ns base (50 MHz period)
+            when "01"   => return 50;         -- 1 μs = 50 clock cycles
+            when "10"   => return 50000;      -- 1 ms = 50,000 cycles
+            when "11"   => return 250000;     -- 5 ms = 250,000 cycles
+            when others => return 1;
+        end case;
+    end function;
+
+begin
+
+    captured_time <= to_integer(unsigned(time_input));
+    led_indicator <= internal_led_indicator;
+
+    process (clk, rst)
+        variable mult: integer;
+    begin
+        if rst = '1' then
+            state           <= IDLE;
+            output_signal   <= '0';
+            count           <= 0;
+            button_last     <= '0';
+            HIGH1_TIME      <= 0;
+            LOW1_TIME       <= 0;
+            HIGH2_TIME      <= 0;
+            HIGH1_MULT      <= "00";
+            LOW1_MULT       <= "00";
+            HIGH2_MULT      <= "00";
+            all_times_set   <= '0';
+            times_set_flag  <= "000";
+            internal_led_indicator <= "000";
+            led_timer       <= 0;
+            led_active      <= '0';
+
+        elsif rising_edge(clk) then
+
+            -- Set durations and base selectors
+            if set_time = "001" then
+                HIGH1_TIME <= captured_time;
+                HIGH1_MULT <= time_base_sel;
+                times_set_flag(0) <= '1';
+                internal_led_indicator <= "001";
+                led_timer <= 0;
+                led_active <= '1';
+
+            elsif set_time = "010" then
+                LOW1_TIME <= captured_time;
+                LOW1_MULT <= time_base_sel;
+                times_set_flag(1) <= '1';
+                internal_led_indicator <= "010";
+                led_timer <= 0;
+                led_active <= '1';
+
+            elsif set_time = "100" then
+                HIGH2_TIME <= captured_time;
+                HIGH2_MULT <= time_base_sel;
+                times_set_flag(2) <= '1';
+                internal_led_indicator <= "100";
+                led_timer <= 0;
+                led_active <= '1';
+            end if;
+
+            -- Turn off LED after timeout
+            if led_active = '1' then
+                if led_timer < LED_TIMEOUT then
+                    led_timer <= led_timer + 1;
+                else
+                    internal_led_indicator <= "000";
+                    led_active <= '0';
+                end if;
+            end if;
+
+            -- Ready flag when all three durations are set
+            if times_set_flag = "111" then
+                all_times_set <= '1';
+            else
+                all_times_set <= '0';
+            end if;
+
+            -- FSM
+            case state is
+                when IDLE =>
+                    if button = '1' and button_last = '0' and all_times_set = '1' then
+                        count <= 0;
+                        output_signal <= '1';
+                        state <= HIGH1;
+                    end if;
+
+                when HIGH1 =>
+                    mult := get_multiplier(HIGH1_MULT);
+                    if count < (HIGH1_TIME * mult) - 1 then
+                        count <= count + 1;
+                    else
+                        count <= 0;
+                        output_signal <= '0';
+                        state <= LOW1;
+                    end if;
+
+                when LOW1 =>
+                    mult := get_multiplier(LOW1_MULT);
+                    if count < (LOW1_TIME * mult) - 1 then
+                        count <= count + 1;
+                    else
+                        count <= 0;
+                        output_signal <= '1';
+                        state <= HIGH2;
+                    end if;
+
+                when HIGH2 =>
+                    mult := get_multiplier(HIGH2_MULT);
+                    if count < (HIGH2_TIME * mult) - 1 then
+                        count <= count + 1;
+                    else
+                        count <= 0;
+                        output_signal <= '0';
+                        state <= IDLE;
+                    end if;
+
+                when others =>
+                    state <= IDLE;
+            end case;
+
+            -- Button edge detection
+            button_last <= button;
+        end if;
+    end process;
+
+end behavioral;

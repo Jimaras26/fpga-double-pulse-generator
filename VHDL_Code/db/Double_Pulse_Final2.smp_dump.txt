@@ -1,0 +1,7 @@
+
+State Machine - |Double_Pulse_Final2|state
+Name state.HIGH2 state.LOW1 state.HIGH1 state.IDLE 
+state.IDLE 0 0 0 0 
+state.HIGH1 0 0 1 1 
+state.LOW1 0 1 0 1 
+state.HIGH2 1 0 0 1 
